@@ -106,6 +106,7 @@ func schedule(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		http.Error(w, "Serialize response error.", http.StatusInternalServerError)
+		return
 	}
 
 	fmt.Fprintf(w, string(bz))
@@ -118,7 +119,15 @@ func add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keys := r.URL.Query()["timeDuration"]
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, "Parse data error.", http.StatusInternalServerError)
+		return
+	}
+
+	data := r.Form
+
+	keys := data["timeDuration"]
 	if keys == nil {
 		http.Error(w, "Require timeDuration parameter", http.StatusNotFound)
 		return
@@ -128,9 +137,9 @@ func add(w http.ResponseWriter, r *http.Request) {
 
 	var waiting bool
 
-	if flag := r.URL.Query()["sync"]; flag != nil {
+	if flag := data["sync"]; flag != nil {
 		waiting = true
-	} else if flag := r.URL.Query()["async"]; flag != nil {
+	} else if flag := data["async"]; flag != nil {
 		waiting = false
 	} else {
 		http.Error(w, "Require flag sync/async", http.StatusNotFound)
@@ -158,6 +167,25 @@ func add(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	count.inc()
+
+	term := make(chan byte) // for termination TaskLoop ability, not implemented
+
+	go TaskLoop(&q, term)
+
+	http.HandleFunc("/add", add)
+
+	http.HandleFunc("/schedule", schedule)
+
+	http.HandleFunc("/time", timeHandler)
+
+	log.Printf("Starting http server ...\n")
+	if err := http.ListenAndServe(":8081", nil); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func New() {
 	count.inc()
 
 	term := make(chan byte) // for termination TaskLoop ability, not implemented
