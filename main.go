@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -25,15 +26,15 @@ func (c *count32) get() int32 {
 }
 
 type Task struct {
-	duration time.Duration
-	number   int32
+	Duration time.Duration `json:"timeDuration"`
+	Number   int32         `json:"number"`
 	resChan  chan byte
 }
 
 func Execute(t *Task) {
-	log.Printf("Starting task №%d...", t.number)
-	time.Sleep(t.duration)
-	log.Printf("Task №%d done!", t.number)
+	log.Printf("Starting task №%d...", t.Number)
+	time.Sleep(t.Duration)
+	log.Printf("Task №%d done!", t.Number)
 
 	if t.resChan != nil {
 		<-t.resChan
@@ -42,13 +43,15 @@ func Execute(t *Task) {
 
 type Queue struct {
 	sync.RWMutex
-	items []Task
+	items   []Task
+	sumTime time.Duration
 }
 
 func (q *Queue) Push(item Task) {
 	q.Lock()
 	defer q.Unlock()
 	q.items = append(q.items, item)
+	q.sumTime += item.Duration
 }
 
 func (q *Queue) Pop() Task {
@@ -59,6 +62,7 @@ func (q *Queue) Pop() Task {
 	}
 	item := q.items[0]
 	q.items = q.items[1:]
+	q.sumTime -= item.Duration
 	return item
 }
 
@@ -75,14 +79,36 @@ func TaskLoop(q *Queue, terminator <-chan byte) {
 			return
 		default:
 			task := q.Pop()
-			if task.number == 0 {
+			if task.Number == 0 {
 				time.Sleep(time.Millisecond) // waiting 1s for new tasks
 				continue
 			}
 			Execute(&task)
 		}
 	}
+}
 
+func timeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method is not supported.", http.StatusNotFound)
+		return
+	}
+
+	fmt.Fprintf(w, q.sumTime.String())
+}
+
+func schedule(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Method is not supported.", http.StatusNotFound)
+		return
+	}
+	bz, err := json.Marshal(q.GetAll())
+
+	if err != nil {
+		http.Error(w, "Serialize response error.", http.StatusInternalServerError)
+	}
+
+	fmt.Fprintf(w, string(bz))
 }
 
 func add(w http.ResponseWriter, r *http.Request) {
@@ -122,10 +148,10 @@ func add(w http.ResponseWriter, r *http.Request) {
 	if waiting {
 		wait := make(chan byte, 1)
 		wait <- 1
-		q.Push(Task{duration: td, number: num, resChan: wait})
+		q.Push(Task{Duration: td, Number: num, resChan: wait})
 		wait <- 1
 	} else {
-		q.Push(Task{duration: td, number: num, resChan: nil})
+		q.Push(Task{Duration: td, Number: num, resChan: nil})
 	}
 
 	fmt.Fprintf(w, "Succes")
@@ -134,11 +160,15 @@ func add(w http.ResponseWriter, r *http.Request) {
 func main() {
 	count.inc()
 
-	term := make(chan byte)
+	term := make(chan byte) // for termination TaskLoop ability, not implemented
 
 	go TaskLoop(&q, term)
 
 	http.HandleFunc("/add", add)
+
+	http.HandleFunc("/schedule", schedule)
+
+	http.HandleFunc("/time", timeHandler)
 
 	log.Printf("Starting http server ...\n")
 	if err := http.ListenAndServe(":8081", nil); err != nil {
