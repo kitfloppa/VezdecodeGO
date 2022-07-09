@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -21,7 +22,15 @@ func (t *Task) Execute() {
 }
 
 func main() {
-	timefile, err := ioutil.ReadFile("input.txt")
+
+	args := os.Args
+
+	if len(args) != 2 {
+		fmt.Printf("Usage: ./%s [input-file]\n", filepath.Base(args[0]))
+		os.Exit(-1)
+	}
+
+	timefile, err := ioutil.ReadFile(args[1])
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
