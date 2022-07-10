@@ -234,7 +234,7 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server {
 
 	srv := &http.Server{Addr: address + ":" + port}
 
-	term := make(chan byte, 1) // for termination TaskLoop ability, not implemented
+	term := make(chan byte, 1)
 
 	go TaskLoop(&q, term)
 
@@ -242,8 +242,8 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server {
 		defer func() {
 			term <- 1
 			wg.Done()
-		}() // let main know we are done cleaning up
-
+		}()
+		log.Printf("Server start at " + srv.Addr)
 		// always returns error. ErrServerClosed on graceful close
 		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 			// unexpected error. port in use?
@@ -251,7 +251,6 @@ func startHttpServer(wg *sync.WaitGroup) *http.Server {
 		}
 	}()
 
-	// returning reference so caller can call Shutdown()
 	return srv
 }
 
