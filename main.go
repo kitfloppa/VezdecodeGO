@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -190,16 +193,24 @@ func init() {
 }
 
 func main() {
-	count.inc()
+	count = 1
 
-	term := make(chan byte) // for termination TaskLoop ability, not implemented
+	log.Printf("Starting HTTP server...")
+	httpServerExitDone := &sync.WaitGroup{}
 
-	go TaskLoop(&q, term)
+	httpServerExitDone.Add(1)
 
-	log.Printf("Starting http server ...\n")
-	if err := http.ListenAndServe(":8081", nil); err != nil {
-		log.Fatal(err)
+	srv := startHttpServer(httpServerExitDone)
+
+	exit := make(chan os.Signal, 1) // we need to reserve to buffer size 1, so the notifier are not blocked
+	signal.Notify(exit, os.Interrupt, syscall.SIGTERM)
+
+	<-exit
+	log.Printf("Server done, exiting...")
+	if err := srv.Shutdown(context.TODO()); err != nil {
+		panic(err) // failure/timeout shutting down the server gracefully
 	}
+	httpServerExitDone.Wait()
 }
 
 func startHttpServer(wg *sync.WaitGroup) *http.Server {
@@ -236,9 +247,8 @@ func New(terminator <-chan byte, httpServerExitDone *sync.WaitGroup) {
 
 	count = 1
 
-	log.Printf("main: starting HTTP server")
+	log.Printf("Starting HTTP server...")
 	srv := startHttpServer(httpServerExitDone)
-
 	<-terminator
 
 	log.Printf("Server done, exiting...")
