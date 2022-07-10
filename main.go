@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/joho/godotenv"
 	"log"
 	"net/http"
 	"os"
@@ -185,6 +186,11 @@ func add(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
+	// loads values from .env into the system
+	if err := godotenv.Load(); err != nil {
+		log.Print("No .env file found")
+	}
+
 	http.HandleFunc("/add", add)
 
 	http.HandleFunc("/schedule", schedule)
@@ -214,7 +220,19 @@ func main() {
 }
 
 func startHttpServer(wg *sync.WaitGroup) *http.Server {
-	srv := &http.Server{Addr: ":8081"}
+	address, exists := os.LookupEnv("ADDRESS")
+
+	if !exists {
+		address = ""
+	}
+
+	port, exists := os.LookupEnv("PORT")
+
+	if !exists {
+		port = "8081"
+	}
+
+	srv := &http.Server{Addr: address + ":" + port}
 
 	term := make(chan byte, 1) // for termination TaskLoop ability, not implemented
 
