@@ -6,11 +6,18 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sync"
 	"testing"
 )
 
 func TestServerOneThreadAsync(t *testing.T) {
-	go New()
+	httpServerExitDone := &sync.WaitGroup{}
+
+	httpServerExitDone.Add(1)
+
+	term := make(chan byte)
+
+	go New(term, httpServerExitDone)
 
 	data := url.Values{
 		"timeDuration": {"0h0m10s"},
@@ -37,17 +44,28 @@ func TestServerOneThreadAsync(t *testing.T) {
 	}
 
 	require.Equal(t, "40s", string(body))
+
+	term <- 1
+
+	httpServerExitDone.Wait()
 }
 
 func TestServerOneThreadSync(t *testing.T) {
-	go New()
+
+	httpServerExitDone := &sync.WaitGroup{}
+
+	httpServerExitDone.Add(1)
+
+	term := make(chan byte)
+
+	go New(term, httpServerExitDone)
 
 	data := url.Values{
 		"timeDuration": {"0h0m10s"},
 		"sync":         {""},
 	}
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 1; i++ {
 		_, err := http.PostForm("http://localhost:8081/add", data)
 		if err != nil {
 			log.Fatal(err)
@@ -67,4 +85,8 @@ func TestServerOneThreadSync(t *testing.T) {
 	}
 
 	require.Equal(t, "0s", string(body))
+
+	term <- 1
+
+	httpServerExitDone.Wait()
 }

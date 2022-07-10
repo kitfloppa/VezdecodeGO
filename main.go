@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -32,9 +33,7 @@ type Task struct {
 }
 
 func Execute(t *Task) {
-	log.Printf("Starting task №%d...", t.Number)
 	time.Sleep(t.Duration)
-	log.Printf("Task №%d done!", t.Number)
 
 	if t.resChan != nil {
 		<-t.resChan
@@ -78,13 +77,29 @@ func TaskLoop(q *Queue, terminator <-chan byte) {
 		case <-terminator:
 			return
 		default:
-			task := q.Pop()
-			if task.Number == 0 {
-				time.Sleep(time.Millisecond) // waiting 1s for new tasks
-				continue
-			}
-			Execute(&task)
+
 		}
+		task := q.Pop()
+		if task.Number == 0 {
+			time.Sleep(time.Millisecond) // waiting 1ms for new tasks
+			continue
+		}
+		select {
+		case <-terminator:
+			return
+		default:
+
+		}
+		log.Printf("Starting task №%d...", task.Number)
+		Execute(&task)
+		select {
+		case <-terminator:
+			return
+		default:
+
+		}
+		log.Printf("Task №%d done!", task.Number)
+
 	}
 }
 
@@ -166,6 +181,14 @@ func add(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Succes")
 }
 
+func init() {
+	http.HandleFunc("/add", add)
+
+	http.HandleFunc("/schedule", schedule)
+
+	http.HandleFunc("/time", timeHandler)
+}
+
 func main() {
 	count.inc()
 
@@ -173,33 +196,53 @@ func main() {
 
 	go TaskLoop(&q, term)
 
-	http.HandleFunc("/add", add)
-
-	http.HandleFunc("/schedule", schedule)
-
-	http.HandleFunc("/time", timeHandler)
-
 	log.Printf("Starting http server ...\n")
 	if err := http.ListenAndServe(":8081", nil); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func New() {
-	count.inc()
+func startHttpServer(wg *sync.WaitGroup) *http.Server {
+	srv := &http.Server{Addr: ":8081"}
 
-	term := make(chan byte) // for termination TaskLoop ability, not implemented
+	term := make(chan byte, 1) // for termination TaskLoop ability, not implemented
 
 	go TaskLoop(&q, term)
 
-	http.HandleFunc("/add", add)
+	go func() {
+		defer func() {
+			term <- 1
+			wg.Done()
+		}() // let main know we are done cleaning up
 
-	http.HandleFunc("/schedule", schedule)
+		// always returns error. ErrServerClosed on graceful close
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			// unexpected error. port in use?
+			log.Fatalf("ListenAndServe(): %v", err)
+		}
+	}()
 
-	http.HandleFunc("/time", timeHandler)
+	// returning reference so caller can call Shutdown()
+	return srv
+}
 
-	log.Printf("Starting http server ...\n")
-	if err := http.ListenAndServe(":8081", nil); err != nil {
-		log.Fatal(err)
+func New(terminator <-chan byte, httpServerExitDone *sync.WaitGroup) {
+
+	q = Queue{
+		RWMutex: sync.RWMutex{},
+		items:   []Task{},
+		sumTime: 0,
+	}
+
+	count = 1
+
+	log.Printf("main: starting HTTP server")
+	srv := startHttpServer(httpServerExitDone)
+
+	<-terminator
+
+	log.Printf("Server done, exiting...")
+	if err := srv.Shutdown(context.TODO()); err != nil {
+		panic(err) // failure/timeout shutting down the server gracefully
 	}
 }
